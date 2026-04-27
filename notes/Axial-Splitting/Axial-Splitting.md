@@ -145,6 +145,10 @@ SWSPy-MFAST + MLDD catalog, one per station, with `_batched` variants for chunke
 - Spatial inversion of φ/δt for stress orientation (handoff to the [[Axial-Stress-Inversion/|stress-inversion]] thread once results are stable).
 - Convert results dictionaries to a tidy DataFrame schema across all stations for joint plotting.
 
+## Daily Notes
+
+- [[04-27-26 Notes]] — repo cleanup: `.gitignore`, untracked legacy/orphan files, tracked active MLDD + NonLinLoc + plotting notebooks
+
 ## Related Notes
 
 - [[Axial-Stress-Inversion/]] — downstream stress-field inversion using φ
