@@ -1,11 +1,3 @@
----
-type: project-hub
-project: Axial Seamount Shear-Wave Splitting
-repo: ~/Seismology/axial-splitting-ml
-created: 2026-04-27
-updated: 2026-04-27
-tags: [axial, shear-wave-splitting, anisotropy, ooi-rca, project-hub]
----
 
 # Axial Splitting — Project Hub
 
@@ -60,12 +52,12 @@ From Christian Baillard's unpublished Python implementation, retained for cross-
 Original upstream behavior — DBSCAN, no Teanby weighting, largest-cluster selection. Not used for production runs; documented in README for traceability of why we forked.
 
 ### Key methodological contrasts
-| | Modified SWSPy | Baillard |
-|---|---|---|
+|                 | Modified SWSPy                                  | Baillard                                        |
+| --------------- | ----------------------------------------------- | ----------------------------------------------- |
 | Window strategy | multiple fixed windows, cluster in window space | single adaptive window, cluster in (φ,δt) space |
-| Window length | fixed (≈0.5–2.0 s) | T_dom × [0.5, 2.0] |
-| Max lag | fixed (e.g. 20 samples) | T_dom × sampling rate |
-| Quality metric | F-statistic 95% region | RMS difference + grid bounds |
+| Window length   | fixed (≈0.5–2.0 s)                              | T_dom × [0.5, 2.0]                              |
+| Max lag         | fixed (e.g. 20 samples)                         | T_dom × sampling rate                           |
+| Quality metric  | F-statistic 95% region                          | RMS difference + grid bounds                    |
 
 ## Quality Control Pipeline
 
