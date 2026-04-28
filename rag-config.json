@@ -1,0 +1,10 @@
+{
+  "folders": [
+    "Axial-Splitting",
+    "Axial-Stress-Inversion"
+  ],
+  "embedDim": 768,
+  "chunkWords": 375,
+  "overlapWords": 75,
+  "batchSize": 25
+}
