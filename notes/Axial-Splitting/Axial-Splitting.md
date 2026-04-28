@@ -157,7 +157,15 @@ Plotting and catalog prep:
 
 ## Daily Notes
 
-- [[04-27-26 Notes]] — repo cleanup: `.gitignore`, untracked legacy/orphan files, tracked active MLDD + NonLinLoc + plotting notebooks.
+- [[09-01-2025 Notes]] — project takeover; Christian's workflow and code; identifying the missing `general` module + NonLinLoc catalog
+- [[01-14-2026 Notes]] — back-azimuth nearly aligned via Baillard's `ll2xy`; rectilinearity/incidence regress after switching to his Jurkevics
+- [[01-20-2026 Notes]] — back-azimuth exact; rectilinearity/incidence aligned; SNR diverges after first event; first splitting comparison (δt ≈ 6 samples vs. Christian's 5.56; φ caught in local minimum)
+- [[01-21-2026 Notes]] — fixed taper/filter ordering (in-place ObsPy ops); rectilinearity/incidence now exact; realised Christian wrote his own splitting code, not MFAST
+- [[01-27-2026 Notes]] — Baillard's single-window method discussed with William; integrating his plots into the event loop; ±-symmetric φ confusion
+- [[01-29-2026 Notes]] — exactly replicate Christian's results via `python run_sws.py`; meetings with Marine & William; convention discrepancy (CCW-from-E vs CW-from-N) resolves SWSPy↔Baillard offset; literature review on MFAST and SWSPy
+- [[02-12-2026 Notes]] — windowing in MFAST/SWSPy/Baillard compared in detail; Wang (2024) S-pick uncertainties (0.0395 s new, 0.0509 s old) set; 8-step plan to roll out at AXAS2 then full catalog
+- [[03-23-2026 Notes]] — SNR bug hunt: post-eruption events report SNR≈1; manual recompute shows real signal is there → sample-indexing bug in the SNR routine
+- [[04-27-26 Notes]] — repo cleanup: `.gitignore`, untracked legacy/orphan files, tracked active MLDD + NonLinLoc + plotting notebooks
 
 ## Related Notes
 
