@@ -5,7 +5,7 @@ Central note for the shear-wave splitting (SWS) project at Axial Seamount. Sourc
 
 ## Scientific Goal
 
-Track the temporal evolution of stress and crack-induced anisotropy in Axial Seamount's caldera through shear-wave splitting on local seismicity. The long-term arc starts **just before the April 2015 eruption** and runs through to the present, currently re-inflated state of stress. Splitting parameters — fast polarization direction (φ) and delay time (δt) — encode the orientation and density of aligned cracks in the shear-wave window. Tracking how these change in space and time should constrain how the volcanic stress field reorganizes around eruptive episodes and feed into volcanic hazard / forecasting work on the Juan de Fuca Ridge.
+Track the temporal evolution of stress and crack-induced anisotropy in Axial Seamount's caldera through shear-wave splitting on local seismicity. The long-term arc starts **just before the April 2015 eruption** and runs through to the present, currently re-inflated state of stress. Splitting parameters — fast polarization direction (φ) and delay time (δt) — encode the orientation and density of aligned cracks in the shear-wave window. Tracking how these change in space and time should constrain how the volcanic stress field reorganizes around eruptive episodes and feed into forecasting work on the Juan de Fuca Ridge.
 
 Key questions:
 - Does φ rotate before/during/after the 2015 eruption?
