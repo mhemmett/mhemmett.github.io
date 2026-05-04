@@ -4,7 +4,8 @@
     "Axial-Stress-Inversion"
   ],
   "embedDim": 768,
-  "chunkWords": 375,
-  "overlapWords": 75,
+  "chunkWords": 500,
+  "overlapWords": 100,
+  "minChunkWords": 180,
   "batchSize": 25
 }

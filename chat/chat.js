@@ -14,9 +14,12 @@ const PATHS = {
 const CONFIG = {
   workerUrl: '',
   embedDim: 768,
-  bm25K: 10,
-  semanticK: 10,
-  fuseK: 5,
+  bm25K: 14,
+  semanticK: 14,
+  lexicalK: 10,
+  fuseK: 6,
+  neighborWindow: 1,
+  maxContextChars: 18000,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -100,8 +103,11 @@ async function loadAssets() {
       fetchBuffer(PATHS.embeddings, 'embeddings.bin'),
     ]);
     mini = MiniSearch.loadJSON(idxText, {
-      fields: ['text', 'noteTitle'],
-      storeFields: ['noteTitle', 'noteUrl', 'chunkIndex', 'noteId'],
+      fields: ['searchText', 'noteTitle', 'sectionTitle', 'sectionPath', 'filePath', 'project', 'date', 'dateFromFilename'],
+      storeFields: [
+        'noteTitle', 'noteUrl', 'chunkIndex', 'noteId', 'sectionTitle', 'sectionPath', 'filePath',
+        'sectionId', 'sectionChunkIndex', 'sectionChunkCount', 'project', 'date', 'dateFromFilename',
+      ],
       idField: 'id',
     });
     chunks = chunkData;
@@ -196,12 +202,20 @@ async function ask(query) {
   const { textEl, cites } = appendAssistant();
   textEl.textContent = '…';
 
+  const direct = directResponse(query);
+  if (direct) {
+    textEl.textContent = direct;
+    return;
+  }
+
+  const temporal = expandTemporalQuery(query);
+  const retrievalQuery = temporal.searchText;
   let qEmb;
   try {
     const r = await fetch(`${CONFIG.workerUrl}/embed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ password, text: query }),
+      body: JSON.stringify({ password, text: retrievalQuery }),
     });
     if (r.status === 401) {
       password = null;
@@ -219,21 +233,31 @@ async function ask(query) {
   }
   const qVec = l2norm(new Float32Array(qEmb));
 
-  const bm25 = mini.search(query, { fuzzy: 0.2, prefix: true })
+  const bm25 = mini.search(retrievalQuery, { fuzzy: 0.2, prefix: true })
     .slice(0, CONFIG.bm25K).map((r) => ({ id: r.id }));
+  const lexical = lexicalSearch(retrievalQuery, CONFIG.lexicalK);
   const semantic = cosineTopK(qVec, CONFIG.semanticK);
-  const fused = rrf(bm25, semantic, CONFIG.fuseK);
+  const fusedRrf = rrf(bm25, semantic, lexical, CONFIG.fuseK);
+  const fused = prependDateMatches(fusedRrf, temporal.dates);
+  const expanded = expandWithNeighbors(fused, CONFIG.neighborWindow);
+  const packed = packContext(expanded, CONFIG.maxContextChars);
 
-  if (fused.length === 0) {
-    textEl.textContent = 'No relevant notes found for that query.';
+  if (packed.length === 0) {
+    textEl.textContent = temporal.dates.length
+      ? `No notes found for ${temporal.dates.join(', ')}.`
+      : 'No relevant notes found for that query.';
     return;
   }
 
-  const context = fused.map((c) => `### ${c.noteTitle}\n${c.text}`).join('\n\n---\n\n');
+  const context = packed.map((c) => {
+    const sectionName = c.sectionPath || c.sectionTitle;
+    const section = sectionName ? ` / ${sectionName}` : '';
+    return `### ${c.noteTitle}${section}\n${c.text}`;
+  }).join('\n\n---\n\n');
 
   cites.innerHTML = '';
   const seen = new Set();
-  for (const c of fused) {
+  for (const c of packed) {
     if (seen.has(c.noteId)) continue;
     seen.add(c.noteId);
     const a = document.createElement('a');
@@ -241,7 +265,8 @@ async function ask(query) {
     a.href = c.noteUrl;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = c.noteTitle;
+    const sectionName = c.sectionPath || c.sectionTitle;
+    a.textContent = sectionName ? `${c.noteTitle} · ${sectionName}` : c.noteTitle;
     cites.appendChild(a);
   }
 
@@ -253,7 +278,7 @@ async function ask(query) {
     const r = await fetch(`${CONFIG.workerUrl}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ password, query, context }),
+      body: JSON.stringify({ password, query: temporal.answerText, context }),
     });
     if (!r.ok || !r.body) {
       const t = await r.text().catch(() => '');
@@ -311,6 +336,173 @@ async function ask(query) {
   }
 }
 
+function directResponse(query) {
+  const q = normalizeLexical(query);
+  if (/^(hi|hello|hey|yo|sup|howdy)$/.test(q)) {
+    return 'Hi. Ask me a question about your synced notes and I will answer from the indexed content.';
+  }
+  if (/^(thanks|thank you|thx)$/.test(q)) {
+    return 'You are welcome.';
+  }
+  if (/^(help|what can you do|what do you do)$/.test(q)) {
+    return 'I can answer questions about your synced notes, cite the notes I used, and help you find relevant sections. Try asking about a project, date, note title, or specific term.';
+  }
+  return null;
+}
+
+function expandTemporalQuery(query) {
+  const today = localDate();
+  const additions = [];
+  const seen = new Set();
+  const add = (label, date) => {
+    if (!date) return;
+    const iso = formatIsoDate(date);
+    if (seen.has(iso)) return;
+    seen.add(iso);
+    additions.push({ label, iso, aliases: dateAliases(date) });
+  };
+
+  const q = normalizeLexical(query);
+  if (/\btoday\b/.test(q)) add('today', today);
+  if (/\byesterday\b/.test(q)) add('yesterday', addDays(today, -1));
+  if (/\btomorrow\b/.test(q)) add('tomorrow', addDays(today, 1));
+
+  for (const d of parseIsoDates(query)) add('mentioned date', d);
+  for (const d of parseNumericDates(query, today.getFullYear())) add('mentioned date', d);
+  for (const d of parseMonthNameDates(query, today.getFullYear())) add('mentioned date', d);
+
+  if (!additions.length) return { searchText: query, answerText: query, dates: [] };
+
+  const dateTerms = additions
+    .flatMap((item) => [item.iso, ...item.aliases])
+    .join(' ');
+  const interpretations = additions
+    .map((item) => `${item.label} = ${item.iso}`)
+    .join('; ');
+
+  return {
+    searchText: `${query} ${dateTerms}`.trim(),
+    answerText: `${query}\n\nDate interpretation for this question: today = ${formatIsoDate(today)}; ${interpretations}.`,
+    dates: additions.map((item) => item.iso),
+  };
+}
+
+function localDate() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function addDays(date, days) {
+  const out = new Date(date);
+  out.setDate(out.getDate() + days);
+  return out;
+}
+
+function formatIsoDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function dateAliases(date) {
+  const yy = String(date.getFullYear()).slice(-2);
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const month = MONTH_NAMES[date.getMonth()];
+  const shortMonth = month.slice(0, 3);
+  const day = String(date.getDate());
+  const ordinal = ordinalDay(date.getDate());
+  return [
+    `${mm}-${dd}-${yy}`,
+    `${mm}-${dd}-${yyyy}`,
+    `${mm}/${dd}/${yy}`,
+    `${mm}/${dd}/${yyyy}`,
+    `${month} ${day}`,
+    `${month} ${ordinal}`,
+    `${shortMonth} ${day}`,
+    `${shortMonth} ${ordinal}`,
+    `${ordinal} of ${month}`,
+  ];
+}
+
+function parseNumericDates(query, defaultYear) {
+  const out = [];
+  const re = /\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2}|\d{4}))?\b/g;
+  let m;
+  while ((m = re.exec(query)) !== null) {
+    if (/\d{4}[-/]$/.test(query.slice(Math.max(0, m.index - 5), m.index))) continue;
+    const month = Number(m[1]);
+    const day = Number(m[2]);
+    const year = parseYear(m[3], defaultYear);
+    const date = validDate(year, month, day);
+    if (date) out.push(date);
+  }
+  return out;
+}
+
+function parseIsoDates(query) {
+  const out = [];
+  const re = /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g;
+  let m;
+  while ((m = re.exec(query)) !== null) {
+    const date = validDate(Number(m[1]), Number(m[2]), Number(m[3]));
+    if (date) out.push(date);
+  }
+  return out;
+}
+
+function parseMonthNameDates(query, defaultYear) {
+  const out = [];
+  const names = MONTH_NAMES.map((m) => `${m}|${m.slice(0, 3)}`).join('|');
+  const suffix = '(?:st|nd|rd|th)?';
+  const monthFirst = new RegExp(`\\b(${names})\\.?\\s+(\\d{1,2})${suffix}(?:,?\\s+(\\d{2}|\\d{4}))?\\b`, 'gi');
+  const dayFirst = new RegExp(`\\b(\\d{1,2})${suffix}\\s+(?:of\\s+)?(${names})\\.?(?:,?\\s+(\\d{2}|\\d{4}))?\\b`, 'gi');
+  let m;
+  while ((m = monthFirst.exec(query)) !== null) {
+    const date = validDate(parseYear(m[3], defaultYear), monthNumber(m[1]), Number(m[2]));
+    if (date) out.push(date);
+  }
+  while ((m = dayFirst.exec(query)) !== null) {
+    const date = validDate(parseYear(m[3], defaultYear), monthNumber(m[2]), Number(m[1]));
+    if (date) out.push(date);
+  }
+  return out;
+}
+
+function parseYear(value, defaultYear) {
+  if (!value) return defaultYear;
+  const year = Number(value);
+  return value.length === 2 ? 2000 + year : year;
+}
+
+function monthNumber(value) {
+  const key = String(value).slice(0, 3).toLowerCase();
+  return MONTH_NAMES.findIndex((m) => m.slice(0, 3).toLowerCase() === key) + 1;
+}
+
+function validDate(year, month, day) {
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+function ordinalDay(day) {
+  const mod10 = day % 10;
+  const mod100 = day % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${day}st`;
+  if (mod10 === 2 && mod100 !== 12) return `${day}nd`;
+  if (mod10 === 3 && mod100 !== 13) return `${day}rd`;
+  return `${day}th`;
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 function l2norm(v) {
   let s = 0;
   for (let i = 0; i < v.length; i++) s += v[i] * v[i];
@@ -334,13 +526,128 @@ function cosineTopK(qVec, k) {
   return scored.slice(0, k);
 }
 
-function rrf(bm25, semantic, k, c = 60) {
+function lexicalSearch(query, k) {
+  const q = normalizeLexical(query);
+  if (!q) return [];
+  const scored = [];
+  for (const c of chunks) {
+    const haystacks = [
+      [c.noteTitle, 8],
+      [c.noteId, 7],
+      [c.filePath, 7],
+      [c.sectionPath, 6],
+      [c.sectionTitle, 5],
+      [c.project, 4],
+      [c.date, 4],
+      [c.dateFromFilename, 4],
+      [c.text, 1],
+    ];
+    let score = 0;
+    for (const [value, weight] of haystacks) {
+      const text = normalizeLexical(value || '');
+      if (!text) continue;
+      if (text === q) score += weight * 8;
+      else if (text.startsWith(q)) score += weight * 5;
+      else if (text.includes(q)) score += weight * 2;
+    }
+    if (score > 0) scored.push({ id: c.id, score });
+  }
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+}
+
+function normalizeLexical(value) {
+  return String(value)
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\-./]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function rrf(bm25, semantic, lexical, k, c = 60) {
   const map = new Map();
   bm25.forEach((r, rank) => map.set(r.id, (map.get(r.id) || 0) + 1 / (c + rank)));
   semantic.forEach((r, rank) => map.set(r.id, (map.get(r.id) || 0) + 1 / (c + rank)));
+  lexical.forEach((r, rank) => map.set(r.id, (map.get(r.id) || 0) + 1.5 / (c + rank)));
   return [...map.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, k)
     .map(([id]) => chunks[id])
     .filter(Boolean);
+}
+
+function prependDateMatches(seedChunks, dates) {
+  if (!dates || !dates.length) return seedChunks;
+  const dateSet = new Set(dates);
+  const out = [];
+  const seen = new Set();
+  for (const c of chunks) {
+    const date = c.date || c.dateFromFilename;
+    if (date && dateSet.has(date) && !seen.has(c.id)) {
+      out.push(c);
+      seen.add(c.id);
+    }
+  }
+  for (const c of seedChunks) {
+    if (!seen.has(c.id)) {
+      out.push(c);
+      seen.add(c.id);
+    }
+  }
+  return out;
+}
+
+function expandWithNeighbors(seedChunks, windowSize = 1) {
+  const wanted = new Map();
+  const bySection = new Map();
+  for (const c of chunks) {
+    const key = c.sectionId || c.noteId;
+    const arr = bySection.get(key) || [];
+    arr.push(c);
+    bySection.set(key, arr);
+  }
+  for (const arr of bySection.values()) {
+    arr.sort((a, b) => (a.sectionChunkIndex ?? a.chunkIndex ?? 0) - (b.sectionChunkIndex ?? b.chunkIndex ?? 0));
+  }
+
+  seedChunks.forEach((chunk, seedRank) => {
+    const key = chunk.sectionId || chunk.noteId;
+    const arr = bySection.get(key) || [chunk];
+    const idx = arr.findIndex((c) => c.id === chunk.id);
+    const center = idx === -1 ? 0 : idx;
+    for (let offset = -windowSize; offset <= windowSize; offset++) {
+      const neighbor = arr[center + offset];
+      if (!neighbor) continue;
+      const distance = Math.abs(offset);
+      const existing = wanted.get(neighbor.id);
+      const rank = seedRank + distance * 0.25;
+      if (!existing || rank < existing.rank) {
+        wanted.set(neighbor.id, { chunk: neighbor, rank });
+      }
+    }
+  });
+
+  return [...wanted.values()]
+    .sort((a, b) => a.rank - b.rank)
+    .map((x) => x.chunk);
+}
+
+function packContext(candidateChunks, maxChars) {
+  const packed = [];
+  const seen = new Set();
+  let chars = 0;
+  for (const c of candidateChunks) {
+    if (!c || seen.has(c.id)) continue;
+    const sectionName = c.sectionPath || c.sectionTitle;
+    const section = sectionName ? ` / ${sectionName}` : '';
+    const blockLen = `### ${c.noteTitle}${section}\n${c.text}`.length + 12;
+    if (packed.length && chars + blockLen > maxChars) continue;
+    packed.push(c);
+    seen.add(c.id);
+    chars += blockLen;
+  }
+  return packed;
 }
